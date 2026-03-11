@@ -11,11 +11,12 @@ import UniformTypeIdentifiers
 
 extension UTType {
     static let photoEditorProject = UTType(exportedAs: "com.nexgen.photoeditor.project",
-                                         conformingTo: .package)
+                                           conformingTo: .json)
 }
 
 struct PhotoEditorDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.photoEditorProject, .png, .jpeg] }
+    static var writableContentTypes: [UTType] { [.photoEditorProject] }
 
     var model: DocumentModel
 
@@ -53,7 +54,21 @@ struct PhotoEditorDocument: FileDocument {
                                   activeLayerId: activeLayerId,
                                   images: images)
         } else if wrapper.isRegularFile, let data = wrapper.regularFileContents {
-            if let image = NSImage(data: data) {
+            if let project = try? JSONDecoder().decode(ProjectFileV2.self, from: data) {
+                let canvasSize = CGSize(width: project.canvasWidth, height: project.canvasHeight)
+                var images: [UUID: NSImage] = [:]
+                let layers = project.layers.map { entry -> LayerModel in
+                    if let imageData = entry.imageData,
+                       let image = NSImage(data: imageData) {
+                        images[entry.layer.id] = image
+                    }
+                    return entry.layer
+                }
+                model = DocumentModel(canvasSize: canvasSize,
+                                      layers: layers,
+                                      activeLayerId: project.activeLayerId,
+                                      images: images)
+            } else if let image = NSImage(data: data) {
                 model = PhotoEditorDocument.makeModel(from: image)
             } else {
                 model = DocumentModel()
@@ -64,10 +79,7 @@ struct PhotoEditorDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        let assetsWrapper = FileWrapper(directoryWithFileWrappers: [:])
-        assetsWrapper.preferredFilename = "assets"
-
-        var layerRecords: [LayerModel] = []
+        var layerRecords: [LayerFile] = []
         let normalizedLayers = model.layers.enumerated().map { index, layer -> LayerModel in
             var updated = layer
             updated.zIndex = model.layers.count - 1 - index
@@ -76,32 +88,20 @@ struct PhotoEditorDocument: FileDocument {
 
         for layer in normalizedLayers {
             var updated = layer
-            let filename = updated.imagePath.isEmpty ? "\(layer.id.uuidString).png" : updated.imagePath
-            updated.imagePath = filename
-
-            if let image = model.image(for: layer.id),
-               let pngData = image.pngData {
-                let fileWrapper = FileWrapper(regularFileWithContents: pngData)
-                fileWrapper.preferredFilename = filename
-                assetsWrapper.addFileWrapper(fileWrapper)
+            if updated.imagePath.isEmpty {
+                updated.imagePath = "\(layer.id.uuidString).png"
             }
-
-            layerRecords.append(updated)
+            let imageData = model.image(for: layer.id)?.pngData
+            layerRecords.append(LayerFile(layer: updated, imageData: imageData))
         }
 
-        let projectFile = ProjectFile(canvasWidth: model.canvasSize.width,
-                                      canvasHeight: model.canvasSize.height,
-                                      layers: layerRecords,
-                                      activeLayerId: model.activeLayerId)
+        let projectFile = ProjectFileV2(formatVersion: 2,
+                                        canvasWidth: model.canvasSize.width,
+                                        canvasHeight: model.canvasSize.height,
+                                        layers: layerRecords,
+                                        activeLayerId: model.activeLayerId)
         let projectData = try JSONEncoder().encode(projectFile)
-        let projectWrapper = FileWrapper(regularFileWithContents: projectData)
-        projectWrapper.preferredFilename = "project.json"
-
-        let root = FileWrapper(directoryWithFileWrappers: [:])
-        root.addFileWrapper(projectWrapper)
-        root.addFileWrapper(assetsWrapper)
-        root.preferredFilename = "PhotoEditor"
-        return root
+        return FileWrapper(regularFileWithContents: projectData)
     }
 }
 
@@ -111,6 +111,21 @@ struct ProjectFile: Codable {
     var canvasHeight: Double
     var layers: [LayerModel]
     var activeLayerId: UUID?
+}
+
+@preconcurrency
+struct ProjectFileV2: Codable {
+    var formatVersion: Int
+    var canvasWidth: Double
+    var canvasHeight: Double
+    var layers: [LayerFile]
+    var activeLayerId: UUID?
+}
+
+@preconcurrency
+struct LayerFile: Codable {
+    var layer: LayerModel
+    var imageData: Data?
 }
 
 private extension PhotoEditorDocument {
