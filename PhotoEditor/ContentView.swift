@@ -24,6 +24,10 @@ struct ContentView: View {
     @State private var cropRect: CGRect?
     @State private var showEmptyHint = true
     @State private var pendingUndoSnapshot: DocumentSnapshot?
+    @State private var showResizeCanvas = false
+    @State private var resizeWidthText = ""
+    @State private var resizeHeightText = ""
+    @State private var zoomScale: CGFloat = 1.0
 
     init(document: Binding<PhotoEditorDocument>) {
         _document = document
@@ -43,14 +47,17 @@ struct ContentView: View {
                         Button(action: addLayerFromImport) {
                             Label("Import", systemImage: "square.and.arrow.down")
                         }
+                        .help("Import image as a new layer")
                         Button(action: deleteSelectedLayer) {
                             Label("Delete", systemImage: "trash")
                         }
                         .disabled(model.activeLayerId == nil)
+                        .help("Delete selected layer")
                         Button(action: duplicateSelectedLayer) {
                             Label("Duplicate", systemImage: "plus.square.on.square")
                         }
                         .disabled(model.activeLayerId == nil)
+                        .help("Duplicate selected layer")
                     }
                 }
         } detail: {
@@ -58,6 +65,7 @@ struct ContentView: View {
                 CanvasEditorView(model: model,
                                  activeTool: $activeTool,
                                  cropRect: $cropRect,
+                                 zoomScale: $zoomScale,
                                  onGestureStart: beginGestureUndo,
                                  onGestureEnd: commitGestureUndo)
                 if showEmptyHint && !model.hasCanvas {
@@ -73,20 +81,36 @@ struct ContentView: View {
                     Button(action: addLayerFromImport) {
                         Label("Import", systemImage: "square.and.arrow.down")
                     }
+                    .help("Import image as a new layer")
                     Button(action: exportImage) {
                         Label("Export", systemImage: "square.and.arrow.up")
                     }
                     .disabled(!model.hasCanvas)
+                    .help("Export flattened image")
                 }
                 ToolbarItemGroup {
                     Button(action: { setTool(.cropCanvas) }) {
                         Label("Crop Canvas", systemImage: "crop")
                     }
                     .disabled(!model.hasCanvas)
+                    .help("Crop the canvas size")
                     Button(action: { setTool(.cropLayer) }) {
                         Label("Crop Layer", systemImage: "crop.rotate")
                     }
                     .disabled(model.activeLayerId == nil)
+                    .help("Crop the selected layer")
+                }
+                ToolbarItemGroup {
+                    Menu {
+                        Button("Resize Canvas") {
+                            prepareResizeCanvas()
+                        }
+                        .disabled(!model.hasCanvas)
+                    } label: {
+                        Label("Tools", systemImage: "wrench.and.screwdriver")
+                    }
+                    .help("Open tools menu")
+                    .disabled(!model.hasCanvas)
                 }
                 if activeTool == .cropCanvas || activeTool == .cropLayer {
                     ToolbarItemGroup {
@@ -94,9 +118,11 @@ struct ContentView: View {
                             Label("Apply Crop", systemImage: "checkmark")
                         }
                         .disabled(cropRect == nil)
+                        .help("Apply crop")
                         Button(action: cancelCrop) {
                             Label("Cancel", systemImage: "xmark")
                         }
+                        .help("Cancel crop")
                     }
                 }
             }
@@ -105,6 +131,12 @@ struct ContentView: View {
             }
             .onAppear {
                 showEmptyHint = !model.hasCanvas
+            }
+            .sheet(isPresented: $showResizeCanvas) {
+                ResizeCanvasSheet(widthText: $resizeWidthText,
+                                  heightText: $resizeHeightText,
+                                  onCancel: { showResizeCanvas = false },
+                                  onApply: applyResizeCanvas)
             }
         }
     }
@@ -147,6 +179,24 @@ struct ContentView: View {
 
         registerUndo(name: "Crop", before: before)
         cancelCrop()
+    }
+
+    private func prepareResizeCanvas() {
+        let width = max(1, Int(model.canvasSize.width))
+        let height = max(1, Int(model.canvasSize.height))
+        resizeWidthText = "\(width)"
+        resizeHeightText = "\(height)"
+        showResizeCanvas = true
+    }
+
+    private func applyResizeCanvas() {
+        guard let width = Double(resizeWidthText),
+              let height = Double(resizeHeightText),
+              width > 1, height > 1 else { return }
+        let before = model.snapshot()
+        model.canvasSize = CGSize(width: width, height: height)
+        registerUndo(name: "Resize Canvas", before: before)
+        showResizeCanvas = false
     }
 
     private func addLayerFromImport() {
@@ -435,10 +485,12 @@ private struct LayerListView: View {
         List {
             ForEach(model.layers) { layer in
                 HStack {
+                    LayerThumbnail(image: model.image(for: layer.id))
                     Button(action: { onToggleVisibility(layer.id) }) {
                         Image(systemName: layer.visible ? "eye" : "eye.slash")
                     }
                     .buttonStyle(.borderless)
+                    .help(layer.visible ? "Hide layer" : "Show layer")
                     Text(layer.name)
                         .lineLimit(1)
                     Spacer()
@@ -463,6 +515,7 @@ private struct CanvasEditorView: View {
     @ObservedObject var model: DocumentModel
     @Binding var activeTool: EditorTool
     @Binding var cropRect: CGRect?
+    @Binding var zoomScale: CGFloat
     let onGestureStart: () -> Void
     let onGestureEnd: () -> Void
 
@@ -471,8 +524,14 @@ private struct CanvasEditorView: View {
     @State private var scaleStartValue: CGSize?
     @State private var rotationStartAngle: Double?
     @State private var rotationStartValue: Double?
+    @State private var zoomStartScale: CGFloat?
 
     var body: some View {
+        let canvasWidth = max(model.canvasSize.width, 1)
+        let canvasHeight = max(model.canvasSize.height, 1)
+        let scaledWidth = canvasWidth * zoomScale
+        let scaledHeight = canvasHeight * zoomScale
+
         ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
                 Canvas { context, size in
@@ -495,8 +554,8 @@ private struct CanvasEditorView: View {
                         localContext.draw(Image(nsImage: image), in: rect)
                     }
                 }
-                .frame(width: max(model.canvasSize.width, 1),
-                       height: max(model.canvasSize.height, 1))
+                .frame(width: canvasWidth,
+                       height: canvasHeight)
                 .background(CanvasCheckerboard())
                 .clipped()
                 .gesture(
@@ -530,10 +589,33 @@ private struct CanvasEditorView: View {
                     CropOverlay(cropRect: $cropRect)
                 }
             }
-            .frame(width: max(model.canvasSize.width, 1),
-                   height: max(model.canvasSize.height, 1))
+            .frame(width: canvasWidth,
+                   height: canvasHeight)
+            .scaleEffect(zoomScale, anchor: .topLeading)
+            .frame(width: scaledWidth, height: scaledHeight, alignment: .topLeading)
             .padding(24)
+            .background(
+                ZoomEventMonitorView { delta in
+                    let newScale = clampZoom(zoomScale * (1 + delta))
+                    zoomScale = newScale
+                }
+                .frame(width: scaledWidth, height: scaledHeight)
+            )
         }
+        .gesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    if zoomStartScale == nil {
+                        zoomStartScale = zoomScale
+                    }
+                    if let start = zoomStartScale {
+                        zoomScale = clampZoom(start * value)
+                    }
+                }
+                .onEnded { _ in
+                    zoomStartScale = nil
+                }
+        )
     }
 
     private var selectedLayer: LayerModel? {
@@ -652,6 +734,10 @@ private struct CanvasEditorView: View {
 
     private func angle(from a: CGPoint, to b: CGPoint) -> Double {
         atan2(Double(b.y - a.y), Double(b.x - a.x))
+    }
+
+    private func clampZoom(_ value: CGFloat) -> CGFloat {
+        min(max(value, 0.1), 8.0)
     }
 }
 
@@ -828,6 +914,139 @@ private struct CanvasCheckerboard: View {
                 }
             }
         }
+    }
+}
+
+private struct LayerThumbnail: View {
+    let image: NSImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.gray.opacity(0.15))
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipped()
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+        )
+        .help("Layer preview")
+    }
+}
+
+private struct ResizeCanvasSheet: View {
+    @Binding var widthText: String
+    @Binding var heightText: String
+    let onCancel: () -> Void
+    let onApply: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Resize Canvas")
+                .font(.title2)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Width")
+                        .frame(width: 60, alignment: .leading)
+                    TextField("Width", text: $widthText)
+                        .textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Height")
+                        .frame(width: 60, alignment: .leading)
+                    TextField("Height", text: $heightText)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Apply", action: onApply)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+    }
+}
+
+private struct ZoomEventMonitorView: NSViewRepresentable {
+    var onZoom: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ZoomEventMonitorNSView {
+        let view = ZoomEventMonitorNSView()
+        view.onZoom = onZoom
+        return view
+    }
+
+    func updateNSView(_ nsView: ZoomEventMonitorNSView, context: Context) {
+        nsView.onZoom = onZoom
+    }
+}
+
+private final class ZoomEventMonitorNSView: NSView {
+    var onZoom: ((CGFloat) -> Void)?
+    private var monitor: Any?
+    private var trackingAreaRef: NSTrackingArea?
+    private var isInside = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        let recognizer = NSMagnificationGestureRecognizer(target: self,
+                                                          action: #selector(handleMagnify(_:)))
+        addGestureRecognizer(recognizer)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+            guard let self, self.isInside else { return event }
+            if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
+                let delta = CGFloat(event.scrollingDeltaY) / 400.0
+                self.onZoom?(-delta)
+                return nil
+            }
+            return event
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    deinit {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaRef {
+            removeTrackingArea(trackingAreaRef)
+        }
+        let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+        let tracking = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        addTrackingArea(tracking)
+        trackingAreaRef = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isInside = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isInside = false
+    }
+
+    @objc private func handleMagnify(_ recognizer: NSMagnificationGestureRecognizer) {
+        onZoom?(recognizer.magnification)
     }
 }
 
