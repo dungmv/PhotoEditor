@@ -198,32 +198,12 @@ struct ContentView: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         if panel.runModal() == .OK, let url = panel.url {
-            let image = renderCompositeImage()
-            if let data = image.pngData {
+            let pipeline = RenderPipeline()
+            if let image = pipeline.render(model: model),
+               let data = image.pngData {
                 try? data.write(to: url)
             }
         }
-    }
-
-    private func renderCompositeImage() -> NSImage {
-        let size = model.canvasSize
-        let result = NSImage(size: size)
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return result }
-        
-        let ctx = NSGraphicsContext(bitmapImageRep: rep)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = ctx
-        
-        let sorted = model.layers.sorted { $0.zIndex < $1.zIndex }
-        for layer in sorted where layer.visible {
-            if let image = model.image(for: layer.id), let cgCtx = ctx?.cgContext {
-                Renderer.shared.render(layer: layer, image: image, in: cgCtx)
-            }
-        }
-        
-        NSGraphicsContext.restoreGraphicsState()
-        result.addRepresentation(rep)
-        return result
     }
 
     private func registerUndo(name: String, before: DocumentSnapshot) {
@@ -267,21 +247,12 @@ private struct CanvasEditorView: View {
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
-                // The Main Canvas
-                Canvas { context, size in
-                    let sorted = model.layers.sorted { $0.zIndex < $1.zIndex }
-                    for layer in sorted where layer.visible {
-                        guard let image = model.image(for: layer.id) else { continue }
-                        Renderer.shared.render(layer: layer, image: image, in: context.cgContext)
+                // NEW: Use CanvasViewport from CanvasModule
+                CanvasViewport(model: model, zoomScale: .constant(1.0))
+                    .frame(width: max(model.canvasSize.width, 1), height: max(model.canvasSize.height, 1))
+                    .onTapGesture {
+                        model.activeLayerId = nil
                     }
-                }
-                .frame(width: max(model.canvasSize.width, 1), height: max(model.canvasSize.height, 1))
-                .background(CanvasCheckerboard())
-                .clipped()
-                .onTapGesture {
-                    // Logic to clear selection if background tapped
-                    model.activeLayerId = nil
-                }
 
                 // Interaction Overlays
                 if activeToolId == "select", let selected = selectedLayer, let image = model.image(for: selected.id) {
@@ -301,7 +272,7 @@ private struct CanvasEditorView: View {
                 }
             }
             .scaleEffect(zoomScale, anchor: .topLeading)
-            .padding(100) // Extra padding for easier interaction
+            .padding(100)
         }
     }
 
@@ -354,5 +325,12 @@ private struct CanvasEditorView: View {
 
     private func angle(from a: CGPoint, to b: CGPoint) -> Double {
         atan2(Double(b.y - a.y), Double(b.x - a.x))
+    }
+}
+
+private extension NSImage {
+    var pngData: Data? {
+        guard let tiff = tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
     }
 }
