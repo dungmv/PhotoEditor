@@ -1,10 +1,3 @@
-//
-//  DocumentModel.swift
-//  PhotoEditor
-//
-//  Created by Codex on 11/3/26.
-//
-
 import AppKit
 import Combine
 import SwiftUI
@@ -59,6 +52,7 @@ struct LayerModel: Identifiable, Codable, Equatable {
     var visible: Bool
     var opacity: Double
     var zIndex: Int
+    var effects: [LayerEffect]
 
     init(id: UUID = UUID(),
          name: String,
@@ -66,7 +60,8 @@ struct LayerModel: Identifiable, Codable, Equatable {
          transform: TransformModel,
          visible: Bool = true,
          opacity: Double = 1.0,
-         zIndex: Int) {
+         zIndex: Int,
+         effects: [LayerEffect] = []) {
         self.id = id
         self.name = name
         self.imagePath = imagePath
@@ -74,6 +69,7 @@ struct LayerModel: Identifiable, Codable, Equatable {
         self.visible = visible
         self.opacity = opacity
         self.zIndex = zIndex
+        self.effects = effects
     }
 }
 
