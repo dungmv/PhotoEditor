@@ -4,7 +4,8 @@ using namespace metal;
 
 extern "C" {
     namespace coreimage {
-        float4 colorAdjustKernel(sample_t s, float brightness, float contrast, float saturation) {
+        
+        [[ stitchable ]] float4 colorAdjustKernel(sample_t s, float brightness, float contrast, float saturation) {
             float4 color = s.rgba;
             // Brightness
             color.rgb += brightness;
@@ -16,11 +17,11 @@ extern "C" {
             return color;
         }
         
-        float4 invertKernel(sample_t s) {
+        [[ stitchable ]] float4 invertKernel(sample_t s) {
             return float4(1.0 - s.rgb, s.a);
         }
         
-        float4 sepiaKernel(sample_t s, float intensity) {
+        [[ stitchable ]] float4 sepiaKernel(sample_t s, float intensity) {
             float3 sepia = float3(
                 dot(s.rgb, float3(0.393, 0.769, 0.189)),
                 dot(s.rgb, float3(0.349, 0.686, 0.168)),
@@ -30,3 +31,4 @@ extern "C" {
         }
     }
 }
+ 
