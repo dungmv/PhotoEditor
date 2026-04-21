@@ -7,15 +7,15 @@ struct CanvasModule: View {
     private let pipeline = RenderPipeline()
     
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1/60)) { context in
+        TimelineView(.periodic(from: .now, by: 1.0/60.0)) { context in
             if let renderedImage = pipeline.render(model: model) {
                 Image(nsImage: renderedImage)
                     .resizable()
                     .interpolation(.none) // Keep it sharp
-                    .frame(width: model.canvasSize.width, height: model.canvasSize.height)
+                    .frame(width: CGFloat(model.canvasSize.width), height: CGFloat(model.canvasSize.height))
             } else {
                 Color.clear
-                    .frame(width: model.canvasSize.width, height: model.canvasSize.height)
+                    .frame(width: CGFloat(model.canvasSize.width), height: CGFloat(model.canvasSize.height))
             }
         }
     }

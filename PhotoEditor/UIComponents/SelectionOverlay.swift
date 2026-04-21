@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreGraphics
 
 struct SelectionOverlay: View {
     let layer: LayerModel
@@ -60,12 +61,13 @@ struct SelectionOverlay: View {
                 )
 
             // Rotation Handle (Top Center, offset)
-            VStack(spacing: 0) {
-                handle(at: CGPoint(x: bounds.midX, y: bounds.minY - 30))
+            ZStack {
                 Rectangle()
                     .fill(Color.accentColor)
                     .frame(width: 1, height: 30)
                     .position(x: bounds.midX, y: bounds.minY - 15)
+                
+                handle(at: CGPoint(x: bounds.midX, y: bounds.minY - 30))
             }
             .gesture(
                 DragGesture()
@@ -89,11 +91,11 @@ struct SelectionOverlay: View {
                           y: -imageSize.height / 2,
                           width: imageSize.width,
                           height: imageSize.height)
-        let transform = CGAffineTransform(translationX: layer.transform.position.x,
-                                           y: layer.transform.position.y)
-            .rotated(by: layer.transform.rotation)
-            .scaledBy(x: layer.transform.scale.width,
-                      y: layer.transform.scale.height)
+        let transform = CGAffineTransform(translationX: CGFloat(layer.transform.position.x),
+                                           y: CGFloat(layer.transform.position.y))
+            .rotated(by: CGFloat(layer.transform.rotation))
+            .scaledBy(x: CGFloat(layer.transform.scale.width),
+                      y: CGFloat(layer.transform.scale.height))
         let points = [
             rect.origin,
             CGPoint(x: rect.maxX, y: rect.minY),

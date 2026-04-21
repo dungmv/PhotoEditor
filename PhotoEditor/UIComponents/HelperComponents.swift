@@ -53,7 +53,6 @@ struct ResizeCanvasSheet: View {
                 Spacer()
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.plain)
-                    .hoverEffect()
                 Button("Apply", action: onApply)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)

@@ -1,5 +1,7 @@
 import CoreImage
 import Foundation
+import AppKit
+import CoreGraphics
 
 /// Protocol for any unit of work in the rendering pipeline
 protocol RenderNode {
